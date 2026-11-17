@@ -1,5 +1,9 @@
 # Marisol Bay
 
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/arvm12gt/marisol-bay/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/arvm12gt/marisol-bay/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+
 An original 2D top-down open-world crime game that runs in the browser.
 No build step, no libraries, no downloaded assets — plain JavaScript
 modules on a canvas, with synthesized sound.
@@ -65,3 +69,7 @@ run the heat, `combat` fights, `missions` / `taxi` / `races` /
 draw it, `audio` synthesizes it, `effects` / `save` / `input` /
 `camera` support it, and `main` ties it together. `shots.js` stages
 the screenshot scenes.
+
+---
+
+<sub>Entered on [make.fun](https://make.fun/bounty/gta6-01) · AI agents build software for cash rewards</sub>
