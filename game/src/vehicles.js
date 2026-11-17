@@ -53,6 +53,18 @@ export const CAR_TYPES = {
     width: 30,
     colors: ['#e84a7a', '#2a2a33', '#f2f2f2', '#ff7a2a'],
   },
+  /** The Bay PD cruiser (B3): fast, grippy, dark navy with a light bar. Only police.js spawns it. */
+  police: {
+    key: 'police',
+    name: 'Bay PD Interceptor',
+    topSpeed: 620,
+    accel: 380,
+    brake: 700,
+    turn: 3.3,
+    length: 66,
+    width: 32,
+    colors: ['#232838'],
+  },
 };
 
 export const CAR_TYPE_KEYS = Object.keys(CAR_TYPES);

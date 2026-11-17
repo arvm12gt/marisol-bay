@@ -89,6 +89,13 @@ export const PALETTE = {
   text: '#f5ead6',
   muted: '#c9b18c',
   accent: '#f2c94c',
+  /** Wanted stars, police lights and the bust meter (B3). */
+  wantedStar: '#f2c94c',
+  wantedStarEmpty: 'rgba(245, 234, 214, 0.35)',
+  policeRed: '#e23b2e',
+  policeBlue: '#2e6fe2',
+  policeWhite: '#dfe3e8',
+  bustRed: '#e23b2e',
 };
 
 export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';

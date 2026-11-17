@@ -8,6 +8,7 @@ import { vehicleLabel } from './vehicles.js';
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
 export const SCREEN_PAUSED = 'paused';
+export const SCREEN_BUSTED = 'busted';
 
 /** The panel's width; its height grows with its lines: room for the title, the lines and the prompt. */
 const PANEL = { width: 640, top: 150, line: 32, bottom: 72 };
@@ -276,6 +277,23 @@ export function createRenderer(canvas) {
         context.fillStyle = 'rgba(255, 255, 255, 0.35)';
         context.fillRect(-halfLen, -2.5, type.length, 5);
       }
+      if (vehicle.police) {
+        // White doors and the roof light bar: red on one side, blue on the
+        // other, alternating with the cruiser's light phase.
+        context.fillStyle = PALETTE.policeWhite;
+        context.fillRect(-halfLen * 0.05, -halfWid + 3, halfLen * 0.3, type.width - 6);
+        const phase = (vehicle.lightPhase ?? 0) % 1;
+        const redOn = phase < 0.5;
+        context.fillStyle = '#20262e';
+        context.fillRect(-14, -6, 28, 12);
+        context.globalAlpha = redOn ? 1 : 0.25;
+        context.fillStyle = PALETTE.policeRed;
+        context.fillRect(-13, -5, 12, 10);
+        context.globalAlpha = redOn ? 0.25 : 1;
+        context.fillStyle = PALETTE.policeBlue;
+        context.fillRect(1, -5, 12, 10);
+        context.globalAlpha = 1;
+      }
       // Headlights ahead, taillights behind.
       context.fillStyle = '#ffe9a8';
       context.fillRect(halfLen - 2, -halfWid + 4, 3, 5);
@@ -368,12 +386,37 @@ export function createRenderer(canvas) {
     context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
     context.textBaseline = 'top';
     text('MARISOL BAY', 24, 18, 26, PALETTE.text, 'left');
-    text('$0', 24, 50, 22, PALETTE.accent, 'left');
+    text(`$${extras.cash ?? 0}`, 24, 50, 22, PALETTE.accent, 'left');
+    // Wanted stars, top right: gold for the heat Jax holds, dim for the rest.
+    const stars = extras.stars ?? 0;
+    let starLine = '';
+    for (let i = 0; i < 5; i += 1) starLine += i < stars ? '★' : '☆';
+    text(starLine, VIEW.width - 24, 16, 26, stars > 0 ? PALETTE.wantedStar : PALETTE.wantedStarEmpty, 'right');
     if (extras.vehicle) {
       text(vehicleLabel(extras.vehicle), 24, 78, 20, PALETTE.text, 'left');
-      text('WASD drive · E exit car · P pause', VIEW.width - 24, 18, 18, PALETTE.muted, 'right');
+      text('WASD drive · E exit car · P pause', VIEW.width - 24, 50, 18, PALETTE.muted, 'right');
     } else {
-      text('WASD / arrows to walk · E steal car · P pause', VIEW.width - 24, 18, 18, PALETTE.muted, 'right');
+      text('WASD / arrows to walk · E steal car · P pause', VIEW.width - 24, 50, 18, PALETTE.muted, 'right');
+      // On foot, the weapon line: fists, or the pistol with its ammunition.
+      if (extras.weapon === 'pistol') {
+        text(`PISTOL ${extras.mag ?? 0}/${extras.reserve ?? 0} · R reload · 1 fists · 2 pistol`, 24, 78, 20, PALETTE.text, 'left');
+      } else if (extras.weapon === 'fists') {
+        text('FISTS · Space punch · 2 pistol', 24, 78, 20, PALETTE.text, 'left');
+      }
+    }
+    // Bust meter: a cruiser sitting on a slow Jax fills it toward BUSTED.
+    if ((extras.bust ?? 0) > 0) {
+      const barW = 220;
+      const barX = (VIEW.width - barW) / 2;
+      const barY = 92;
+      text('POLICE CLOSING IN', VIEW.width / 2, barY - 26, 18, PALETTE.bustRed, 'center');
+      context.fillStyle = 'rgba(20, 12, 8, 0.7)';
+      context.fillRect(barX, barY, barW, 14);
+      context.fillStyle = PALETTE.bustRed;
+      context.fillRect(barX, barY, barW * Math.min(1, extras.bust), 14);
+      context.strokeStyle = PALETTE.text;
+      context.lineWidth = 2;
+      context.strokeRect(barX, barY, barW, 14);
     }
     if (extras.hint) {
       text(extras.hint, VIEW.width / 2, VIEW.height - 44, 20, PALETTE.accent, 'center');
@@ -422,6 +465,26 @@ export function createRenderer(canvas) {
     // Golden-hour wash over the world, before the HUD.
     context.fillStyle = PALETTE.duskTint;
     context.fillRect(rect.x - 64, rect.y - 64, rect.width + 128, rect.height + 128);
+    // Particles sit on top of the wash so flashes and glows read clearly.
+    if (extras.effects) extras.effects.draw(context, rect);
+    // Crosshair at the mouse while the pistol is out (on foot only).
+    if (extras.aim && extras.weapon === 'pistol' && !player.vehicle) {
+      const ax = extras.aim.x;
+      const ay = extras.aim.y;
+      context.strokeStyle = PALETTE.accent;
+      context.lineWidth = 2;
+      context.beginPath();
+      context.arc(ax, ay, 10, 0, Math.PI * 2);
+      context.moveTo(ax - 14, ay);
+      context.lineTo(ax - 6, ay);
+      context.moveTo(ax + 6, ay);
+      context.lineTo(ax + 14, ay);
+      context.moveTo(ax, ay - 14);
+      context.lineTo(ax, ay - 6);
+      context.moveTo(ax, ay + 6);
+      context.lineTo(ax, ay + 14);
+      context.stroke();
+    }
     if (screen === SCREEN_TITLE) {
       context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
       drawPanel('MARISOL BAY', TITLE_LINES, 'Press Space or click to start');
@@ -431,6 +494,15 @@ export function createRenderer(canvas) {
     if (screen === SCREEN_PAUSED) {
       context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
       drawPanel('Paused', ['The bay will wait for you.'], 'Press P to resume');
+    }
+    if (screen === SCREEN_BUSTED) {
+      context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
+      const fine = extras.bustInfo?.fine ?? 0;
+      drawPanel(
+        'BUSTED',
+        ['The Bay PD caught Jax.', `Fine paid: $${fine}.`, 'The heat is off — for now.'],
+        'Press Space to continue',
+      );
     }
   }
 

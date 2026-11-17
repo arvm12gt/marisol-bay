@@ -12,6 +12,8 @@ export function createPlayer(spawn) {
     /** Facing angle in radians; 0 is east, -PI/2 is north. */
     facing: -Math.PI / 2,
     moving: false,
+    /** Cash on hand: pedestrians drop it (B3), missions and fares pay it (B4), a bust fines it (B3). */
+    cash: 0,
     /** The vehicle Jax is driving, or null while on foot (B2). */
     vehicle: null,
   };

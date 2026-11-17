@@ -100,8 +100,12 @@ export function createPedestrians(world, random, count = 26) {
     return best === null ? null : { vehicle: best, distance: bestDist };
   }
 
-  /** One fixed step: walk, idle, flee or lie down, then move. */
-  function update(dt, isBlocked, vehicles) {
+  /**
+   * One fixed step: walk, idle, flee or lie down, then move. `onDown`, when
+   * given, is called with (ped, vehicle) each time a car knocks one down —
+   * the main loop uses it to charge the driver with a crime (B3).
+   */
+  function update(dt, isBlocked, vehicles, onDown = null) {
     for (const ped of list) {
       if (ped.state === 'down') {
         ped.downTimer -= dt;
@@ -146,6 +150,7 @@ export function createPedestrians(world, random, count = 26) {
             ped.state = 'down';
             ped.downTimer = DOWN_SECONDS;
             ped.speed = 0;
+            if (onDown !== null) onDown(ped, vehicle);
             break;
           }
         }

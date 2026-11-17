@@ -7,6 +7,10 @@
 
 export const ACTION_CONFIRM = 1;
 export const ACTION_PAUSE = 2;
+/** B3 one-shot combat presses: R reload, 1 fists, 2 pistol. */
+export const ACTION_RELOAD = 4;
+export const ACTION_FISTS = 8;
+export const ACTION_PISTOL = 16;
 
 const UP = new Set(['ArrowUp', 'KeyW']);
 const DOWN = new Set(['ArrowDown', 'KeyS']);
@@ -14,20 +18,36 @@ const LEFT = new Set(['ArrowLeft', 'KeyA']);
 const RIGHT = new Set(['ArrowRight', 'KeyD']);
 const CONFIRM = new Set(['Space', 'Enter']);
 const PAUSE = new Set(['KeyP', 'Escape']);
+const RELOAD = new Set(['KeyR']);
+const FISTS = new Set(['Digit1']);
+const PISTOL = new Set(['Digit2']);
 // Reserved for B2–B4: E interact, F enter/exit vehicle, Shift sprint.
 const RESERVED = new Set(['KeyE', 'KeyF', 'ShiftLeft', 'ShiftRight']);
 
 export function createInput(target) {
   const held = new Set();
   let actions = 0;
+  /** The pointer in viewport (CSS) pixels, for aiming; combat reads it through mouse(). */
+  const mouse = { x: 0, y: 0, down: false, clicked: false };
 
   window.addEventListener('keydown', (event) => {
     if (UP.has(event.code) || DOWN.has(event.code) || LEFT.has(event.code) || RIGHT.has(event.code)) {
       held.add(event.code);
     } else if (CONFIRM.has(event.code)) {
+      // Space is both the start button and the punch (B3): hold it too, so
+      // the loop can take its rising edge while the game is running.
+      held.add(event.code);
       if (!event.repeat) actions |= ACTION_CONFIRM;
     } else if (PAUSE.has(event.code)) {
       if (!event.repeat) actions |= ACTION_PAUSE;
+    } else if (RELOAD.has(event.code)) {
+      // One-shot combat presses are queued as flags, never polled from the
+      // held set: a quick tap between two frames still fires, exactly once.
+      if (!event.repeat) actions |= ACTION_RELOAD;
+    } else if (FISTS.has(event.code)) {
+      if (!event.repeat) actions |= ACTION_FISTS;
+    } else if (PISTOL.has(event.code)) {
+      if (!event.repeat) actions |= ACTION_PISTOL;
     } else if (RESERVED.has(event.code)) {
       held.add(event.code);
     } else return;
@@ -39,9 +59,21 @@ export function createInput(target) {
   // A key released while the tab is hidden never sends keyup: let go of everything on blur.
   window.addEventListener('blur', () => {
     held.clear();
+    mouse.down = false;
   });
-  target.addEventListener('pointerdown', () => {
+  target.addEventListener('pointermove', (event) => {
+    mouse.x = event.clientX;
+    mouse.y = event.clientY;
+  });
+  target.addEventListener('pointerdown', (event) => {
+    mouse.x = event.clientX;
+    mouse.y = event.clientY;
+    mouse.down = true;
+    mouse.clicked = true;
     actions |= ACTION_CONFIRM;
+  });
+  window.addEventListener('pointerup', () => {
+    mouse.down = false;
   });
 
   function hasAny(codes) {
@@ -60,9 +92,19 @@ export function createInput(target) {
       }
       return { x, y };
     },
-    /** True while a reserved key (E, F or Shift) is held. */
+    /** True while a held key (E, F, Shift, a move key, or Space) is down. */
     isDown(code) {
       return held.has(code);
+    },
+    /** The pointer's viewport position and whether its button is held. */
+    mouse() {
+      return { x: mouse.x, y: mouse.y, down: mouse.down };
+    },
+    /** True once per click since the last call (aiming/shooting reads it). */
+    takeClick() {
+      const clicked = mouse.clicked;
+      mouse.clicked = false;
+      return clicked;
     },
     /** The one-shot presses since the last call, as ACTION_* flags. */
     takeActions() {
