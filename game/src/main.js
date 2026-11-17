@@ -127,14 +127,83 @@ window.__marisol = {
   minimap: renderer.minimap,
 };
 
+// The title menu's story blurb (the panel's own title is MARISOL BAY).
+// Module level so the title screenshot paints the same menu as the game.
+const TITLE_BLURB = [
+  'Jax Marlowe just rolled into town with nothing but a stolen',
+  'sunset and a name to make. Mama Rosa has work for him —',
+  'if he can stay out of trouble long enough to take it.',
+];
+
 function runShot(name) {
-  const scene = stageShot(name, world, player, camera);
+  const scene = stageShot(name, world, player, camera, {
+    vehicles,
+    traffic,
+    wanted,
+    police,
+    missions,
+    pedestrians,
+    effects,
+  });
+  // The staged screen, for headless tooling (runGame never runs in shot mode,
+  // so __marisol.getScreen is not attached here).
+  window.__shotScreen = scene.screen;
+  // The same extras the live loop paints, so a shot shows the full HUD:
+  // stars, cash, health, the minimap and the current objective.
+  const markers = [...missions.markers(), ...taxi.markers(), ...races.markers()];
+  const tokensList = collectibles.list.filter((t) => !t.taken);
+  const missionObjective = missions.current ? missions.currentObjective() : null;
   let painted = 0;
   function paint() {
     renderer.draw(world, player.player, camera.camera, scene.screen, {
       vehicles,
       pedestrians: pedestrians.list,
+      vehicle: player.player.vehicle,
       effects,
+      stars: wanted.stars,
+      cash: player.player.cash,
+      weapon: player.player.vehicle ? null : combat.weapon,
+      mag: combat.mag,
+      reserve: combat.reserve,
+      bust: police.bust,
+      health: player.player.health,
+      maxHealth: player.player.maxHealth,
+      armor: player.player.armor,
+      maxArmor: player.player.maxArmor,
+      muted: audio.muted,
+      minimapVisible: renderer.minimap.visible,
+      minimap: {
+        world,
+        player: player.player,
+        policeCars: police.cars,
+        markers,
+        tokens: tokensList,
+        hideout: wanted.hideout,
+      },
+      shake: effects.shakeOffset(),
+      armorList: collectibles.armor.filter((v) => !v.taken),
+      objective: missionObjective ? missionObjective.text : null,
+      activity: null,
+      // The title shot paints the same menu the game opens with (same
+      // blurb, same items; the item list lives here and in titleMenuItems).
+      menu:
+        scene.screen === SCREEN_TITLE
+          ? {
+              title: 'MARISOL BAY',
+              blurb: TITLE_BLURB,
+              items: [
+                { label: 'Start Game', action: 'start' },
+                { label: 'Continue', action: 'continue', disabled: !saveExists },
+                { label: 'Missions', action: 'missions' },
+                { label: 'How to Play', action: 'howto' },
+              ],
+              selected: 0,
+              footer: 'WASD or arrows to choose · Space or click to select',
+            }
+          : null,
+      markers,
+      tokensList,
+      tokens: { collected: collectibles.collected, total: collectibles.total },
     });
     painted += 1;
     if (painted < 2) requestAnimationFrame(paint);
@@ -191,13 +260,6 @@ function runGame() {
   function announce(message) {
     status.textContent = message;
   }
-
-  /** The title menu's story blurb (the panel's own title is MARISOL BAY). */
-  const TITLE_BLURB = [
-    'Jax Marlowe just rolled into town with nothing but a stolen',
-    'sunset and a name to make. Mama Rosa has work for him —',
-    'if he can stay out of trouble long enough to take it.',
-  ];
 
   function titleMenuItems() {
     return [
