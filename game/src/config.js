@@ -55,6 +55,9 @@ export const CAMERA = {
 /** The fixer who gives Jax his jobs (introduced properly in B4). */
 export const FIXER = { name: 'Mama Rosa' };
 
+/** Marisol General hospital: where Jax wakes up after going down (B5). */
+export const HOSPITAL = { x: 840, y: 420 };
+
 /** Golden-hour dusk over a pastel deco city. */
 export const PALETTE = {
   backdrop: '#1c1410',
@@ -96,6 +99,10 @@ export const PALETTE = {
   policeBlue: '#2e6fe2',
   policeWhite: '#dfe3e8',
   bustRed: '#e23b2e',
+  /** Health and armor bars (B5). */
+  health: '#58b368',
+  healthLow: '#e23b2e',
+  armor: '#2e6fe2',
 };
 
 export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';

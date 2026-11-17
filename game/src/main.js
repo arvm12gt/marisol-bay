@@ -11,7 +11,7 @@
 // window.__marisol exposes the live world, player and camera for headless
 // checks (B1 verification) and later screenshot tooling; it is read-only
 // from the page's point of view and changes nothing about the game.
-import { STEP, VIEW } from './config.js';
+import { HOSPITAL, STEP, VIEW } from './config.js';
 import { createRandom } from './random.js';
 import { createWorld } from './world.js';
 import { createPlayer } from './player.js';
@@ -21,6 +21,8 @@ import {
   ACTION_FISTS,
   ACTION_MENU_DOWN,
   ACTION_MENU_UP,
+  ACTION_MINIMAP,
+  ACTION_MUTE,
   ACTION_PAUSE,
   ACTION_PISTOL,
   ACTION_RELOAD,
@@ -29,6 +31,7 @@ import {
 import {
   SCREEN_BRIEFING,
   SCREEN_BUSTED,
+  SCREEN_DOWN,
   SCREEN_FAILED,
   SCREEN_HOWTO,
   SCREEN_MISSIONS,
@@ -51,6 +54,7 @@ import { createTaxi } from './taxi.js';
 import { RACE_CHECKPOINTS, createRaces, formatRaceTime } from './races.js';
 import { createCollectibles } from './collectibles.js';
 import { clearSave, loadSave, saveGame } from './save.js';
+import { createAudio } from './audio.js';
 
 /** The longest frame the loop catches up on; a longer stall (a hidden tab) is dropped, not replayed. */
 const MAX_FRAME = 0.25;
@@ -98,6 +102,10 @@ if (loadedSave) {
   races.applySave(loadedSave.raceBest);
 }
 
+// B5: synthesized sound (its mute state comes from the save) and the
+// minimap, which lives in the renderer.
+const audio = createAudio({ muted: loadedSave ? loadedSave.muted : false });
+
 // A live handle for headless verification and screenshot tooling.
 window.__marisol = {
   world,
@@ -115,6 +123,8 @@ window.__marisol = {
   taxi,
   races,
   collectibles,
+  audio,
+  minimap: renderer.minimap,
 };
 
 function runShot(name) {
@@ -145,6 +155,18 @@ function runGame() {
   let bustTimer = 0;
   /** The fine of the last bust, shown on the BUSTED panel. */
   let bustFine = 0;
+  /** B5: seconds the FLATLINED panel has been up; it releases Jax after 3. */
+  let downTimer = 0;
+  /** B5: the hospital bill of the last death, shown on the FLATLINED panel. */
+  let downBill = 0;
+  /** B5: seconds since Jax last took damage; health comes back after 8 calm seconds. */
+  let hurtTimer = 99;
+  /** B5: seconds until the next crash can hurt again (one impact, one hit). */
+  let crashCooldown = 0;
+  /** B5: seconds until the next skid mark may be laid. */
+  let skidTimer = 0;
+  /** B5: seconds until the next smoke puff from a damaged car. */
+  let smokeTimer = 0;
   /** The job on the briefing screen, or null. */
   let briefingMission = null;
   /** The last finished job, shown on the JOB DONE / JOB FAILED panel. */
@@ -160,6 +182,10 @@ function runGame() {
   window.__marisol.getMenu = () => ({ screen, selected: menuSelected, menu: menuFor(screen) });
   window.__marisol.getMissionEnd = () => missionEnd;
   window.__marisol.saveGame = () => saveGameNow();
+  /** Headless checks: hurt Jax (and run the death flow if he goes down). */
+  window.__marisol.damagePlayer = (amount) => hurtPlayer(amount);
+  /** Headless checks: wear a car down (it explodes at 0 durability). */
+  window.__marisol.damageVehicle = (car, amount) => damageVehicle(car, amount);
 
   // Screen readers (and anyone watching the page's text) hear the screen changes.
   function announce(message) {
@@ -239,7 +265,7 @@ function runGame() {
       missionsCompleted: missions.completed,
       raceBest: races.best,
       tokensTaken: collectibles.list.filter((t) => t.taken).map((t) => t.index),
-      muted: false,
+      muted: audio.muted,
     });
     saveExists = true;
   }
@@ -256,6 +282,13 @@ function runGame() {
     police.clearAll();
     combat.mag = combat.MAG_SIZE;
     combat.reserve = 48;
+    player.resetHealth();
+    // Burnt-out cars come back clean on a fresh run.
+    for (const car of vehicles) {
+      car.durability = 100;
+      car.wrecked = false;
+      car.color = car.paint;
+    }
     player.player.cash = 0;
     player.player.x = world.city.spawn.x;
     player.player.y = world.city.spawn.y;
@@ -441,6 +474,7 @@ function runGame() {
       menuSelected = 0;
     } else if (screen === SCREEN_PAUSED) activateMenuItem(pauseMenuItems()[menuSelected]);
     else if (screen === SCREEN_BUSTED) releaseBusted();
+    else if (screen === SCREEN_DOWN) releaseDown();
   }
 
   /**
@@ -482,8 +516,128 @@ function runGame() {
     }
   });
 
+  /**
+   * B5: hurt Jax (armor takes 60% until it runs out). Going down sends
+   * him to hospital; otherwise the health comes back after 8 calm seconds.
+   */
+  function hurtPlayer(amount) {
+    if (screen !== SCREEN_PLAY || player.player.health <= 0) return;
+    hurtTimer = 0;
+    effects.shake(0.45);
+    audio.play('hurt');
+    const died = player.hurt(amount);
+    if (died) triggerDown();
+  }
+
+  /** B5: one hard impact — damage scales with the speed that was lost. */
+  function crashHit(speed) {
+    if (crashCooldown > 0 || screen !== SCREEN_PLAY) return;
+    crashCooldown = 0.6;
+    const damage = Math.max(4, Math.min(24, Math.round((speed - 200) * 0.04)));
+    if (player.player.vehicle) damageVehicle(player.player.vehicle, damage * 2);
+    effects.shake(0.5);
+    audio.play('crash');
+    hurtPlayer(damage);
+  }
+
+  /** B5: wear a car down; at 0 durability it burns out. */
+  function damageVehicle(car, amount) {
+    if (!car || car.wrecked || car.police) return;
+    car.durability -= amount;
+    if (car.durability <= 0) explodeVehicle(car);
+  }
+
+  /** B5: a car burning out — fireball, wreck, and Jax thrown clear if he was driving. */
+  function explodeVehicle(car) {
+    car.wrecked = true;
+    car.parked = true;
+    car.speed = 0;
+    car.color = '#1c1a18';
+    effects.explosion(car.x, car.y);
+    audio.play('explosion');
+    if (car.driver === 'player') {
+      car.driver = null;
+      player.player.vehicle = null;
+      const spot = world.nearestWalkable(car.x + 40, car.y + 40, player.player.radius);
+      player.player.x = spot.x;
+      player.player.y = spot.y;
+      hurtPlayer(25);
+    } else if (car.driver === 'ai') {
+      traffic.removeCar(car);
+      car.driver = null;
+    }
+  }
+
+  /**
+   * B5: Jax went down — hospital bill, wake up at Marisol General with
+   * full health, the heat cleared, the cruisers gone. A death during a
+   * job fails it; the FAILED panel follows this one.
+   */
+  function triggerDown() {
+    const stars = wanted.stars;
+    const bill = Math.min(player.player.cash, 100 + 25 * stars);
+    player.player.cash -= bill;
+    downBill = bill;
+    if (player.player.vehicle) {
+      const car = player.player.vehicle;
+      car.driver = null;
+      car.parked = true;
+      car.speed = 0;
+      player.player.vehicle = null;
+    }
+    player.player.x = HOSPITAL.x;
+    player.player.y = HOSPITAL.y;
+    player.resetHealth();
+    wanted.reset();
+    police.clearAll();
+    downTimer = 0;
+    screen = SCREEN_DOWN;
+    announce(`Flatlined. Hospital bill $${bill}.`);
+    audio.play('down');
+    if (missions.current) {
+      const name = missions.current.def.name;
+      missions.fail('down');
+      missionEnd = { kind: 'failed', name, reason: 'down' };
+      pendingMissionFailed = true;
+    }
+  }
+
+  /**
+   * Leave the FLATLINED panel: back to the streets, or to the JOB FAILED
+   * panel when the death ended a job in progress.
+   */
+  function releaseDown() {
+    // Drop the stale fail event the death queued; the panel already says it.
+    missions.drainEvents();
+    if (pendingMissionFailed) {
+      pendingMissionFailed = false;
+      screen = SCREEN_FAILED;
+      announce('Job failed.');
+    } else {
+      screen = SCREEN_PLAY;
+      announce('Back on the streets.');
+    }
+  }
+
   function step() {
     if (screen !== SCREEN_PLAY) return;
+    // B5: the continuous voices follow the drive; the siren fades in
+    // with the nearest cruiser. Health comes back after 8 calm seconds.
+    let nearestCruiser = null;
+    for (const car of police.cars) {
+      const dist = Math.hypot(car.x - player.player.x, car.y - player.player.y);
+      if (nearestCruiser === null || dist < nearestCruiser) nearestCruiser = dist;
+    }
+    audio.update(STEP, {
+      speed: player.player.vehicle ? player.player.vehicle.speed : 0,
+      inCar: player.player.vehicle !== null,
+      sirenDist: nearestCruiser,
+    });
+    hurtTimer += STEP;
+    if (crashCooldown > 0) crashCooldown -= STEP;
+    if (hurtTimer > 8 && player.player.health > 0 && player.player.health < player.player.maxHealth) {
+      player.heal(6 * STEP);
+    }
     // The frame's one-shot combat presses, consumed here so a quick tap
     // between two frames still fires, exactly once.
     const combatInput = combatActions;
@@ -502,6 +656,7 @@ function runGame() {
       const move = input.moveVector();
       const prevX = car.x;
       const prevY = car.y;
+      const speedBefore = car.speed;
       driveVehicle(car, STEP, -move.y, move.x, world.isBlocked);
       // Soft car-to-car collision: never overlap another car.
       for (const other of vehicles) {
@@ -515,6 +670,21 @@ function runGame() {
           effects.sparks(car.x, car.y, 6);
           break;
         }
+      }
+      // B5: a hard stop — into a wall or another car — hurts Jax and his car.
+      if (Math.abs(speedBefore) > 300 && Math.abs(car.speed) < Math.abs(speedBefore) * 0.45) {
+        crashHit(Math.abs(speedBefore));
+      }
+      // B5: hard cornering at speed leaves skid marks; a battered car smokes.
+      skidTimer -= STEP;
+      if (Math.abs(move.x) > 0.6 && Math.abs(car.speed) > 220 && skidTimer <= 0) {
+        effects.skid(car.x, car.y, car.angle);
+        skidTimer = 0.06;
+      }
+      smokeTimer -= STEP;
+      if (car.durability < 40 && smokeTimer <= 0) {
+        effects.smoke(car.x, car.y, 2);
+        smokeTimer = 0.25;
       }
       player.player.x = car.x;
       player.player.y = car.y;
@@ -556,6 +726,10 @@ function runGame() {
     });
     for (const event of combat.drainEvents()) {
       if (event.type === 'cash') announce(`Picked up $${event.amount}.`);
+      else if (event.type === 'shot') audio.play('shot');
+      else if (event.type === 'punch') audio.play('punch');
+      else if (event.type === 'hit') audio.play('hit');
+      else if (event.type === 'reload' || event.type === 'reloaded') audio.play('reload');
     }
 
     // B4: the job chain, the cab fares, the race and the sun tokens. A job
@@ -571,10 +745,12 @@ function runGame() {
         saveGameNow();
         screen = SCREEN_PASSED;
         announce(`${event.name} complete. Earned $${event.reward}.`);
+        audio.play('missionPass');
       } else if (event.type === 'failed') {
         missionEnd = { kind: 'failed', name: event.name, reason: event.reason };
         screen = SCREEN_FAILED;
         announce('Job failed.');
+        audio.play('missionFail');
       }
     }
     taxi.update(STEP);
@@ -584,25 +760,37 @@ function runGame() {
       else if (event.type === 'fare-paid') {
         announce(`Fare paid: $${event.amount}${event.tip ? ' (with tip)' : ''}.`);
         saveGameNow();
+        audio.play('fare');
       } else if (event.type === 'fare-cancelled') announce('The fare walked away.');
     }
     races.update(STEP, world.isBlocked);
     for (const event of races.drainEvents()) {
       if (event.type === 'race-start') announce('Race starting — get ready.');
       else if (event.type === 'race-go') announce('Go!');
-      else if (event.type === 'checkpoint') announce(`Checkpoint ${event.index} of ${event.total}.`);
-      else if (event.type === 'race-done') {
+      else if (event.type === 'checkpoint') {
+        announce(`Checkpoint ${event.index} of ${event.total}.`);
+        audio.play('checkpoint');
+      } else if (event.type === 'race-done') {
         announce(`Race done in ${formatRaceTime(event.time)} — $${event.pay}.`);
         saveGameNow();
-      } else if (event.type === 'race-lost') announce('The rival beat you to the line.');
-      else if (event.type === 'race-abandoned') announce('Race abandoned.');
+        audio.play('missionPass');
+      } else if (event.type === 'race-lost') {
+        announce('The rival beat you to the line.');
+        audio.play('missionFail');
+      } else if (event.type === 'race-abandoned') announce('Race abandoned.');
     }
     collectibles.update();
     for (const event of collectibles.drainEvents()) {
-      if (event.type === 'token') announce(`Sun token ${event.collected} of 30 — $${event.amount}.`);
-      else if (event.type === 'tokens-complete') {
+      if (event.type === 'token') {
+        announce(`Sun token ${event.collected} of 30 — $${event.amount}.`);
+        audio.play('token');
+      } else if (event.type === 'tokens-complete') {
         announce(`All 30 tokens! Bonus $${event.amount}.`);
         saveGameNow();
+        audio.play('missionPass');
+      } else if (event.type === 'armor') {
+        announce(`Armor vest — +${event.amount} armor.`);
+        audio.play('pickup');
       }
     }
 
@@ -615,6 +803,14 @@ function runGame() {
     });
     wanted.update(STEP, police.cars, player.player.x, player.player.y);
     police.update(STEP, player.player, world.isBlocked);
+    // B5: a cruiser's ram hurts Jax and his car.
+    for (const event of police.drainEvents()) {
+      if (event.type === 'ram') {
+        if (player.player.vehicle) damageVehicle(player.player.vehicle, event.amount * 2);
+        audio.play('crash');
+        hurtPlayer(event.amount);
+      }
+    }
     effects.update(STEP);
     if (police.bust >= 1) triggerBusted();
     camera.update(STEP, player.player.x, player.player.y);
@@ -630,6 +826,14 @@ function runGame() {
     // while already playing also counts as a punch (Space/click, fists).
     const wasPlay = screen === SCREEN_PLAY;
     const actions = input.takeActions();
+    // B5: M toggles the minimap, N toggles the sound; any press at all
+    // unlocks the audio context (browsers block it before a gesture).
+    if (actions & ACTION_MINIMAP) renderer.minimap.toggle();
+    if (actions & ACTION_MUTE) {
+      audio.setMuted(!audio.muted);
+      announce(audio.muted ? 'Sound muted.' : 'Sound on.');
+    }
+    if (actions !== 0) audio.unlock();
     // On a menu screen a click picks the item under it (a click on empty
     // space picks nothing) and swallows the press it came with, so one
     // click never fires two menu actions.
@@ -659,6 +863,12 @@ function runGame() {
       // or on to the JOB FAILED panel when the bust ended a job.
       bustTimer += frameDt;
       if (bustTimer >= 3) releaseBusted();
+      accumulator = 0;
+    } else if (screen === SCREEN_DOWN) {
+      // The hospital panel holds the world still, then sends Jax back out —
+      // or on to the JOB FAILED panel when the death ended a job.
+      downTimer += frameDt;
+      if (downTimer >= 3) releaseDown();
       accumulator = 0;
     } else if (screen === SCREEN_TITLE || screen === SCREEN_PLAY) {
       while (accumulator >= STEP && (screen === SCREEN_TITLE || screen === SCREEN_PLAY)) {
@@ -701,6 +911,7 @@ function runGame() {
       activity = races.resultText;
     }
     const markers = [...missions.markers(), ...taxi.markers(), ...races.markers()];
+    const tokensList = collectibles.list.filter((t) => !t.taken);
     const drawn = renderer.draw(world, player.player, camera.camera, screen, {
       vehicles,
       pedestrians: pedestrians.list,
@@ -715,6 +926,24 @@ function runGame() {
       bust: police.bust,
       aim,
       bustInfo: { fine: bustFine },
+      downInfo: { bill: downBill },
+      // B5: health and armor, the mute state, the minimap and the shake.
+      health: player.player.health,
+      maxHealth: player.player.maxHealth,
+      armor: player.player.armor,
+      maxArmor: player.player.maxArmor,
+      muted: audio.muted,
+      minimapVisible: renderer.minimap.visible,
+      minimap: {
+        world,
+        player: player.player,
+        policeCars: police.cars,
+        markers,
+        tokens: tokensList,
+        hideout: wanted.hideout,
+      },
+      shake: effects.shakeOffset(),
+      armorList: collectibles.armor.filter((v) => !v.taken),
       menu: menuFor(screen),
       briefing: briefingMission
         ? {
@@ -740,13 +969,15 @@ function runGame() {
                   ]
                 : missionEnd.reason === 'busted'
                   ? ['The Bay PD caught Jax.', 'The job is blown.']
-                  : ['The clock ran out.', 'The job is blown.'],
+                  : missionEnd.reason === 'down'
+                    ? ['Jax went down in the streets.', 'The job is blown.']
+                    : ['The clock ran out.', 'The job is blown.'],
           }
         : { lines: [] },
       objective: missionObjective ? missionObjective.text : null,
       activity,
       markers,
-      tokensList: collectibles.list.filter((t) => !t.taken),
+      tokensList,
       tokens: { collected: collectibles.collected, total: collectibles.total },
     });
     menuRects = drawn?.menu ?? null;

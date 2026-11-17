@@ -80,6 +80,7 @@ let nextId = 1;
 /** One car at (x, y) facing `angle` (0 is east, -PI/2 is north). */
 export function createVehicle(typeKey, x, y, angle, color) {
   const type = CAR_TYPES[typeKey] ?? CAR_TYPES.sedan;
+  const paint = color ?? type.colors[Math.floor(Math.random() * type.colors.length)];
   return {
     id: nextId++,
     type,
@@ -88,11 +89,17 @@ export function createVehicle(typeKey, x, y, angle, color) {
     angle,
     /** Signed speed in world units per second; negative is reversing. */
     speed: 0,
-    color: color ?? type.colors[Math.floor(Math.random() * type.colors.length)],
+    color: paint,
+    /** The factory paint, so a wrecked car comes back clean on a new game. */
+    paint,
     /** 'player' | 'ai' | null (parked, nobody inside). */
     driver: null,
     /** A parked car never moves on its own. */
     parked: false,
+    /** B5: structural health. Hard crashes wear it down; at 0 the car burns out. */
+    durability: 100,
+    /** B5: a burnt-out car is a charred husk that never drives again. */
+    wrecked: false,
   };
 }
 

@@ -29,6 +29,10 @@ function makeParticle(x, y, vx, vy, life, size, color, opts = {}) {
 
 export function createEffects() {
   const particles = [];
+  /** B5: skid marks left by hard driving — dark decals that fade slowly. */
+  const skids = [];
+  /** B5: screen shake, 0 to 1: an impact sets it, it decays every step. */
+  let trauma = 0;
 
   function add(particle) {
     if (particles.length >= MAX_PARTICLES) particles.shift();
@@ -101,8 +105,48 @@ export function createEffects() {
     });
   }
 
+  /** Shake the camera: an impact sets the trauma, it fades over a second. */
+  function shake(power) {
+    trauma = Math.min(1, Math.max(trauma, power));
+  }
+
+  /** The current shake offset in world units (0 when calm). */
+  function shakeOffset() {
+    const strength = trauma * trauma * 16;
+    return {
+      x: (Math.random() * 2 - 1) * strength,
+      y: (Math.random() * 2 - 1) * strength,
+    };
+  }
+
+  /** A skid mark where a tyre slid: capped, so a long chase never floods the list. */
+  function skid(x, y, angle) {
+    if (skids.length >= 150) skids.shift();
+    skids.push({ x, y, angle, life: 6 });
+  }
+
+  /** A car burning out: a fireball, a smoke column, and a hard shake. */
+  function explosion(x, y) {
+    add(makeParticle(x, y, 0, 0, 0.18, 46, '#fff3c9', { glow: true }));
+    burst(x, y, 26, ['#ffd23e', '#ff9a2a', '#ff5a2a', '#ff3a1a'], 380, 5, 0.7, {
+      gravity: 260,
+      drag: 0.45,
+      glow: true,
+    });
+    burst(x, y, 10, ['#3a3230', '#5a5148', '#8a7f74'], 60, 10, 1.6, {
+      drag: 0.85,
+      grow: 34,
+    });
+    shake(1);
+  }
+
   /** One fixed step: move every particle, age it, drop the dead ones. */
   function update(dt) {
+    trauma = Math.max(0, trauma - dt * 1.6);
+    for (let i = skids.length - 1; i >= 0; i -= 1) {
+      skids[i].life -= dt;
+      if (skids[i].life <= 0) skids.splice(i, 1);
+    }
     for (let i = particles.length - 1; i >= 0; i -= 1) {
       const p = particles[i];
       p.life -= dt;
@@ -122,6 +166,25 @@ export function createEffects() {
 
   /** Draw the particles inside `rect` (the visible world rect). */
   function draw(context, rect) {
+    // Skid marks first, under the particles: dark tyre lines on the road.
+    for (const skidMark of skids) {
+      if (
+        skidMark.x < rect.x - 40 ||
+        skidMark.x > rect.x + rect.width + 40 ||
+        skidMark.y < rect.y - 40 ||
+        skidMark.y > rect.y + rect.height + 40
+      ) {
+        continue;
+      }
+      context.save();
+      context.translate(skidMark.x, skidMark.y);
+      context.rotate(skidMark.angle);
+      context.globalAlpha = 0.3 * Math.min(1, skidMark.life / 2);
+      context.fillStyle = '#241a12';
+      context.fillRect(-14, -3, 28, 6);
+      context.restore();
+    }
+    context.globalAlpha = 1;
     let additive = false;
     for (const p of particles) {
       if (
@@ -159,8 +222,15 @@ export function createEffects() {
     flash,
     glow,
     coins,
+    shake,
+    shakeOffset,
+    skid,
+    explosion,
     get count() {
       return particles.length;
+    },
+    get skidCount() {
+      return skids.length;
     },
   };
 }

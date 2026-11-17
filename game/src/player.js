@@ -16,7 +16,31 @@ export function createPlayer(spawn) {
     cash: 0,
     /** The vehicle Jax is driving, or null while on foot (B2). */
     vehicle: null,
+    /** Health (B5): 0 means going down. Armor takes 60% of a hit until it runs out. */
+    health: 100,
+    maxHealth: 100,
+    armor: 0,
+    maxArmor: 100,
   };
+
+  /** Take a hit: armor absorbs 60% of it until it runs out. Returns true when Jax goes down. */
+  function hurt(amount) {
+    const absorbed = Math.min(player.armor, amount * 0.6);
+    player.armor -= absorbed;
+    player.health = Math.max(0, player.health - (amount - absorbed));
+    return player.health <= 0;
+  }
+
+  /** Patch up: health only, never above the max. */
+  function heal(amount) {
+    player.health = Math.min(player.maxHealth, player.health + amount);
+  }
+
+  /** Full health, no armor: a new game, or waking up in hospital. */
+  function resetHealth() {
+    player.health = player.maxHealth;
+    player.armor = 0;
+  }
 
   /** One fixed step: `move` is a normalised {x, y} vector from input. */
   function update(dt, move, isBlocked) {
@@ -34,5 +58,5 @@ export function createPlayer(spawn) {
     player.facing += diff * Math.min(1, PLAYER.turnRate * dt);
   }
 
-  return { player, update };
+  return { player, update, hurt, heal, resetHealth };
 }

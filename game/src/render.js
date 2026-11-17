@@ -4,11 +4,14 @@
 // canvas text; the dusk wash is one translucent fill over the finished world.
 import { CITY, FONT, GRID, PALETTE, VIEW } from './config.js';
 import { vehicleLabel } from './vehicles.js';
+import { createMinimap } from './minimap.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
 export const SCREEN_PAUSED = 'paused';
 export const SCREEN_BUSTED = 'busted';
+/** B5: Jax went down — the hospital panel, like BUSTED but its own flow. */
+export const SCREEN_DOWN = 'down';
 /** B4: the job list, a job briefing, the end of a job, and the controls. */
 export const SCREEN_MISSIONS = 'missions';
 export const SCREEN_BRIEFING = 'briefing';
@@ -28,6 +31,8 @@ function litWindow(litSeed, col, row) {
 export function createRenderer(canvas) {
   const context = canvas.getContext('2d');
   const view = { scale: 1, x: 0, y: 0 };
+  /** B5: the minimap lives in the renderer — it draws in screen space, after the HUD. */
+  const minimap = createMinimap();
 
   function resize() {
     const ratio = window.devicePixelRatio || 1;
@@ -44,8 +49,13 @@ export function createRenderer(canvas) {
   function text(value, x, y, size, color, align) {
     if (!fonts.has(size)) fonts.set(size, `${size}px ${FONT}`);
     context.font = fonts.get(size);
-    context.fillStyle = color;
     context.textAlign = align;
+    // A dark outline under every string (B5): HUD text stays readable
+    // over pale buildings, sand and the dusk wash alike.
+    context.lineWidth = Math.max(2, size / 5);
+    context.strokeStyle = 'rgba(20, 12, 8, 0.8)';
+    context.strokeText(value, x, y);
+    context.fillStyle = color;
     context.fillText(value, x, y);
   }
 
@@ -387,6 +397,18 @@ export function createRenderer(canvas) {
     context.stroke();
   }
 
+  /** A labelled bar: a dark backing, a fill, an outline, the label inside. */
+  function bar(x, y, w, h, frac, color, label) {
+    context.fillStyle = 'rgba(20, 12, 8, 0.7)';
+    context.fillRect(x, y, w, h);
+    context.fillStyle = color;
+    context.fillRect(x, y, w * Math.max(0, Math.min(1, frac)), h);
+    context.strokeStyle = PALETTE.text;
+    context.lineWidth = 2;
+    context.strokeRect(x, y, w, h);
+    text(label, x + 6, y + 2, 11, PALETTE.text, 'left');
+  }
+
   function drawHud(extras) {
     // Screen space: reset the transform first (the caller draws the HUD after the world).
     context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
@@ -400,9 +422,9 @@ export function createRenderer(canvas) {
     text(starLine, VIEW.width - 24, 16, 26, stars > 0 ? PALETTE.wantedStar : PALETTE.wantedStarEmpty, 'right');
     if (extras.vehicle) {
       text(vehicleLabel(extras.vehicle), 24, 78, 20, PALETTE.text, 'left');
-      text('WASD drive · E exit car · P pause', VIEW.width - 24, 50, 18, PALETTE.muted, 'right');
+      text('WASD drive · E exit · M map · N mute · P pause', VIEW.width - 24, 50, 18, PALETTE.muted, 'right');
     } else {
-      text('WASD / arrows to walk · E steal car · P pause', VIEW.width - 24, 50, 18, PALETTE.muted, 'right');
+      text('WASD / arrows to walk · E steal car · M map · N mute · P pause', VIEW.width - 24, 50, 18, PALETTE.muted, 'right');
       // On foot, the weapon line: fists, or the pistol with its ammunition.
       if (extras.weapon === 'pistol') {
         text(`PISTOL ${extras.mag ?? 0}/${extras.reserve ?? 0} · R reload · 1 fists · 2 pistol`, 24, 78, 20, PALETTE.text, 'left');
@@ -439,6 +461,25 @@ export function createRenderer(canvas) {
     if (extras.tokens) {
       text(`☀ ${extras.tokens.collected}/${extras.tokens.total}`, VIEW.width - 24, 78, 20, PALETTE.accent, 'right');
     }
+    // Sound state, top right under the tokens: N flips it.
+    text(extras.muted ? 'MUTED — N for sound' : '♪ N to mute', VIEW.width - 24, 106, 16, PALETTE.muted, 'right');
+    // Health and armor (B5), bottom left: green turns red as Jax fades.
+    const health = extras.health ?? 100;
+    const maxHealth = extras.maxHealth ?? 100;
+    const armor = extras.armor ?? 0;
+    const maxArmor = extras.maxArmor ?? 100;
+    bar(24, VIEW.height - 84, 220, 14, armor / maxArmor, PALETTE.armor, `ARMOR ${Math.round(armor)}`);
+    bar(
+      24,
+      VIEW.height - 60,
+      220,
+      14,
+      health / maxHealth,
+      health < 30 ? PALETTE.healthLow : PALETTE.health,
+      `HEALTH ${Math.round(health)}`,
+    );
+    // The minimap, bottom right — unless the player hid it with M.
+    if (extras.minimapVisible && extras.minimap) minimap.draw(context, extras.minimap);
   }
 
   function drawPanel(title, lines, prompt) {
@@ -460,6 +501,9 @@ export function createRenderer(canvas) {
     'E — steal a car / get out of one.',
     'Space — punch · Click — aim and shoot the pistol.',
     '1 fists · 2 pistol · R reload.',
+    'M — toggle the map · N — mute the sound.',
+    'Cruisers and hard crashes hurt — watch your health.',
+    'Blue vests give armor. Health comes back slowly.',
     'Drive a cab and fares will find you.',
     'Drive into the pink RACE marker to run the loop.',
     '30 gold sun tokens hide around the bay, $25 each.',
@@ -501,6 +545,20 @@ export function createRenderer(canvas) {
       context.beginPath();
       context.arc(token.x, token.y, 3, 0, Math.PI * 2);
       context.fill();
+    }
+  }
+
+  /** Armor vests still lying out in the world: blue shields with a white cross. */
+  function drawArmor(rect, vests) {
+    for (const vest of vests) {
+      if (!inView(rect, vest.x - 16, vest.y - 16, 32, 32)) continue;
+      context.fillStyle = PALETTE.armor;
+      context.beginPath();
+      context.arc(vest.x, vest.y, 9, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle = '#ffffff';
+      context.fillRect(vest.x - 5, vest.y - 2, 10, 4);
+      context.fillRect(vest.x - 2, vest.y - 5, 4, 10);
     }
   }
 
@@ -555,7 +613,16 @@ export function createRenderer(canvas) {
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.fillStyle = PALETTE.backdrop;
     context.fillRect(0, 0, canvas.width, canvas.height);
-    context.setTransform(view.scale, 0, 0, view.scale, view.x - camera.x * view.scale, view.y - camera.y * view.scale);
+    // B5: the camera shakes with impacts — the offset rides on the view, never on the world.
+    const shake = extras.shake ?? { x: 0, y: 0 };
+    context.setTransform(
+      view.scale,
+      0,
+      0,
+      view.scale,
+      view.x - (camera.x + shake.x) * view.scale,
+      view.y - (camera.y + shake.y) * view.scale,
+    );
     drawGround(rect, world);
     drawRoads(rect, world);
     drawBoardwalk(rect, world);
@@ -571,6 +638,7 @@ export function createRenderer(canvas) {
     if (extras.effects) extras.effects.draw(context, rect);
     if (extras.markers) drawMarkers(rect, extras.markers);
     if (extras.tokensList) drawTokens(rect, extras.tokensList);
+    if (extras.armorList) drawArmor(rect, extras.armorList);
     // Crosshair at the mouse while the pistol is out (on foot only).
     if (extras.aim && extras.weapon === 'pistol' && !player.vehicle) {
       const ax = extras.aim.x;
@@ -624,10 +692,18 @@ export function createRenderer(canvas) {
         'Press Space to continue',
       );
     }
+    if (screen === SCREEN_DOWN) {
+      const bill = extras.downInfo?.bill ?? 0;
+      drawPanel(
+        'FLATLINED',
+        ['The bay got the better of Jax.', `Hospital bill: $${bill}.`, 'Patched up and back on the streets.'],
+        'Press Space to continue',
+      );
+    }
     return {};
   }
 
   resize();
   window.addEventListener('resize', resize);
-  return { draw };
+  return { draw, minimap };
 }

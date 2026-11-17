@@ -43,6 +43,8 @@ export function createPolice(world, random, vehicles, wanted, effects, options =
   /** The cruisers, a subset of the shared `vehicles` list. */
   const cars = [];
   let spawnTimer = 0;
+  /** B5: rams the main loop turns into damage (a cruiser hitting Jax hurts). */
+  const events = [];
 
   const police = {
     /** The cruisers (a live subset of the shared vehicle list). */
@@ -123,6 +125,11 @@ export function createPolice(world, random, vehicles, wanted, effects, options =
   /** Register the bust callback (B4 missions fail the run from it). */
   function setBustedHandler(handler) {
     police.onBusted = handler;
+  }
+
+  /** Take the ram events since the last call (the main loop turns them into damage). */
+  function drainEvents() {
+    return events.splice(0, events.length);
   }
 
   /**
@@ -207,7 +214,8 @@ export function createPolice(world, random, vehicles, wanted, effects, options =
       }
 
       // Ramming the player's car: slow him down, and a hard hit he drives
-      // into a cruiser counts as his crime, not the cruiser's.
+      // into a cruiser counts as his crime, not the cruiser's. A hard ram
+      // also hurts Jax and his car (B5): the main loop reads the event.
       if (player.vehicle) {
         const pcar = player.vehicle;
         const pdx = pcar.x - car.x;
@@ -222,7 +230,21 @@ export function createPolice(world, random, vehicles, wanted, effects, options =
             }
             pcar.speed *= 0.55;
             effects.sparks(pcar.x, pcar.y, 8);
+            if (car.ramCooldown <= 0) {
+              car.ramCooldown = 1.5;
+              events.push({ type: 'ram', amount: 8 + Math.abs(pcar.speed) * 0.02, car });
+            }
           }
+        }
+      } else {
+        // A cruiser clipping Jax on foot knocks him around too.
+        const pdx = player.x - car.x;
+        const pdy = player.y - car.y;
+        const pdist = Math.hypot(pdx, pdy);
+        if (pdist < 42 && pdist > 0.01 && Math.abs(car.speed) > 100 && car.ramCooldown <= 0) {
+          car.ramCooldown = 1.5;
+          events.push({ type: 'ram', amount: 14, car });
+          effects.sparks(player.x, player.y, 8);
         }
       }
       if (car.ramCooldown > 0) car.ramCooldown -= dt;
@@ -261,6 +283,7 @@ export function createPolice(world, random, vehicles, wanted, effects, options =
 
   police.clearAll = clearAll;
   police.setBustedHandler = setBustedHandler;
+  police.drainEvents = drainEvents;
   police.update = update;
   return police;
 }

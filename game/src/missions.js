@@ -221,7 +221,7 @@ export function createMissions({ world, player, vehicles, wanted, effects }) {
     current = null;
   }
 
-  /** End the run early: 'busted' or 'time'. */
+  /** End the run early: 'busted', 'down' or 'time'. */
   function fail(reason) {
     if (current === null) return;
     events.push({ type: 'failed', id: current.def.id, name: current.def.name, reason });

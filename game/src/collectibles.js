@@ -10,6 +10,9 @@ export const TOKEN_COUNT = 30;
 const TOKEN_CASH = 25;
 const ALL_BONUS = 500;
 const PICKUP_RADIUS = 36;
+/** B5: four armor vests around town — +50 armor each, never above the max. */
+const ARMOR_COUNT = 4;
+const ARMOR_AMOUNT = 50;
 
 export function createCollectibles(world, random, player, effects) {
   const { city } = world;
@@ -46,9 +49,31 @@ export function createCollectibles(world, random, player, effects) {
 
   const events = [];
 
+  /** Armor vests: seeded sidewalk spots, drawn after the tokens so the token layout never moves. */
+  const armor = [];
+  for (let i = 0; i < ARMOR_COUNT; i += 1) {
+    const vertical = random() < 0.5;
+    const off = GRID.roadWidth / 2 + GRID.sidewalk / 2;
+    let x;
+    let y;
+    if (vertical) {
+      const avenue = city.avenues[Math.floor(random() * city.avenues.length)];
+      x = avenue + (random() < 0.5 ? -off : off);
+      y = range(random, 120, city.height - 120);
+    } else {
+      const street = city.streets[Math.floor(random() * city.streets.length)];
+      x = range(random, 120, city.boardwalkX - 120);
+      y = street + (random() < 0.5 ? -off : off);
+    }
+    const spot = world.nearestWalkable(x, y, 10);
+    armor.push({ index: i, x: spot.x, y: spot.y, taken: false });
+  }
+
   const collectibles = {
     /** Every token, taken or not: the renderer draws the ones still out. */
     list: tokens,
+    /** Every armor vest, taken or not: the renderer draws the ones still out. */
+    armor,
     get collected() {
       return tokens.filter((t) => t.taken).length;
     },
@@ -74,6 +99,19 @@ export function createCollectibles(world, random, player, effects) {
         }
       }
     }
+    // A vest only counts when it adds armor: at full armor it stays put.
+    for (const vest of armor) {
+      if (vest.taken || player.armor >= player.maxArmor) continue;
+      const dx = vest.x - player.x;
+      const dy = vest.y - player.y;
+      if (dx * dx + dy * dy < PICKUP_RADIUS * PICKUP_RADIUS) {
+        vest.taken = true;
+        const gained = Math.min(ARMOR_AMOUNT, player.maxArmor - player.armor);
+        player.armor += gained;
+        effects.glow(vest.x, vest.y, 'rgba(46, 111, 226, 0.6)', 44);
+        events.push({ type: 'armor', amount: gained });
+      }
+    }
   }
 
   /** Mark tokens taken from a save, by index (the layout is seeded). */
@@ -84,6 +122,7 @@ export function createCollectibles(world, random, player, effects) {
   /** Forget every pickup (a new game). */
   function reset() {
     for (const token of tokens) token.taken = false;
+    for (const vest of armor) vest.taken = false;
   }
 
   /** Take the events since the last call (the main loop announces them). */

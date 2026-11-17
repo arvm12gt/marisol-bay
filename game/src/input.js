@@ -14,6 +14,9 @@ export const ACTION_PISTOL = 16;
 /** B4 one-shot menu presses: W/Up and S/Down move the highlight. */
 export const ACTION_MENU_UP = 32;
 export const ACTION_MENU_DOWN = 64;
+/** B5 one-shot toggles: M shows or hides the minimap, N mutes the sound. */
+export const ACTION_MINIMAP = 128;
+export const ACTION_MUTE = 256;
 
 const UP = new Set(['ArrowUp', 'KeyW']);
 const DOWN = new Set(['ArrowDown', 'KeyS']);
@@ -24,6 +27,8 @@ const PAUSE = new Set(['KeyP', 'Escape']);
 const RELOAD = new Set(['KeyR']);
 const FISTS = new Set(['Digit1']);
 const PISTOL = new Set(['Digit2']);
+const MINIMAP = new Set(['KeyM']);
+const MUTE = new Set(['KeyN']);
 // Reserved for B2–B4: E interact, F enter/exit vehicle, Shift sprint.
 const RESERVED = new Set(['KeyE', 'KeyF', 'ShiftLeft', 'ShiftRight']);
 
@@ -57,6 +62,10 @@ export function createInput(target) {
       if (!event.repeat) actions |= ACTION_FISTS;
     } else if (PISTOL.has(event.code)) {
       if (!event.repeat) actions |= ACTION_PISTOL;
+    } else if (MINIMAP.has(event.code)) {
+      if (!event.repeat) actions |= ACTION_MINIMAP;
+    } else if (MUTE.has(event.code)) {
+      if (!event.repeat) actions |= ACTION_MUTE;
     } else if (RESERVED.has(event.code)) {
       held.add(event.code);
     } else return;
