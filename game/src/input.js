@@ -11,6 +11,9 @@ export const ACTION_PAUSE = 2;
 export const ACTION_RELOAD = 4;
 export const ACTION_FISTS = 8;
 export const ACTION_PISTOL = 16;
+/** B4 one-shot menu presses: W/Up and S/Down move the highlight. */
+export const ACTION_MENU_UP = 32;
+export const ACTION_MENU_DOWN = 64;
 
 const UP = new Set(['ArrowUp', 'KeyW']);
 const DOWN = new Set(['ArrowDown', 'KeyS']);
@@ -33,6 +36,12 @@ export function createInput(target) {
   window.addEventListener('keydown', (event) => {
     if (UP.has(event.code) || DOWN.has(event.code) || LEFT.has(event.code) || RIGHT.has(event.code)) {
       held.add(event.code);
+      // W/S and the arrows are also the menu keys: queue one press each so
+      // a quick tap between two frames still moves the highlight, exactly once.
+      if (!event.repeat) {
+        if (UP.has(event.code)) actions |= ACTION_MENU_UP;
+        if (DOWN.has(event.code)) actions |= ACTION_MENU_DOWN;
+      }
     } else if (CONFIRM.has(event.code)) {
       // Space is both the start button and the punch (B3): hold it too, so
       // the loop can take its rising edge while the game is running.

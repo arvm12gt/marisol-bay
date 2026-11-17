@@ -40,6 +40,8 @@ export function createWanted() {
     lastCrime: {},
     /** Total game seconds elapsed, for cooldowns. */
     time: 0,
+    /** A hideout point, or null: inside it the heat cools three times as fast (B4, the Heat Escape job). */
+    hideout: null,
   };
 
   /**
@@ -73,10 +75,29 @@ export function createWanted() {
     wanted.hiddenTimer = 0;
   }
 
+  /** Set the hideout point ({x, y, radius}) or clear it with null. */
+  function setHideout(point) {
+    wanted.hideout = point;
+    wanted.hiddenTimer = 0;
+  }
+
+  /** Cool one star off after enough hidden time at the current heat. */
+  function coolOff(dt) {
+    wanted.hiddenTimer += dt;
+    // Higher heat takes longer to shake: 4 seconds a star, plus 3 per star held.
+    const coolTime = 4 + wanted.stars * 3;
+    if (wanted.hiddenTimer >= coolTime) {
+      wanted.stars -= 1;
+      wanted.heat = wanted.stars > 0 ? 0.8 : 0;
+      wanted.hiddenTimer = 0;
+    }
+  }
+
   /**
    * One fixed step. `policeCars` is the police list; `playerX`/`playerY`
    * is Jax. Hidden time builds only while no cruiser is near, then one
-   * star cools off at a time.
+   * star cools off at a time — except inside the hideout, where the heat
+   * cools three times as fast even with cruisers on the block.
    */
   function update(dt, policeCars, playerX, playerY) {
     wanted.time += dt;
@@ -85,20 +106,21 @@ export function createWanted() {
       wanted.hiddenTimer = 0;
       return;
     }
+    const hideout = wanted.hideout;
+    if (
+      hideout !== null &&
+      Math.hypot(playerX - hideout.x, playerY - hideout.y) < hideout.radius
+    ) {
+      coolOff(dt * 3);
+      return;
+    }
     let nearest = Infinity;
     for (const car of policeCars) {
       const dist = Math.hypot(car.x - playerX, car.y - playerY);
       if (dist < nearest) nearest = dist;
     }
     if (nearest > SIGHT_DIST) {
-      wanted.hiddenTimer += dt;
-      // Higher heat takes longer to shake: 4 seconds a star, plus 3 per star held.
-      const coolTime = 4 + wanted.stars * 3;
-      if (wanted.hiddenTimer >= coolTime) {
-        wanted.stars -= 1;
-        wanted.heat = wanted.stars > 0 ? 0.8 : 0;
-        wanted.hiddenTimer = 0;
-      }
+      coolOff(dt);
     } else {
       wanted.hiddenTimer = 0;
     }
@@ -108,6 +130,7 @@ export function createWanted() {
   // stars/heat at their creation values and the HUD would never move.
   wanted.addCrime = addCrime;
   wanted.setStars = setStars;
+  wanted.setHideout = setHideout;
   wanted.reset = reset;
   wanted.update = update;
   return wanted;

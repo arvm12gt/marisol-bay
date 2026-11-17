@@ -9,6 +9,12 @@ export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
 export const SCREEN_PAUSED = 'paused';
 export const SCREEN_BUSTED = 'busted';
+/** B4: the job list, a job briefing, the end of a job, and the controls. */
+export const SCREEN_MISSIONS = 'missions';
+export const SCREEN_BRIEFING = 'briefing';
+export const SCREEN_PASSED = 'passed';
+export const SCREEN_FAILED = 'failed';
+export const SCREEN_HOWTO = 'howto';
 
 /** The panel's width; its height grows with its lines: room for the title, the lines and the prompt. */
 const PANEL = { width: 640, top: 150, line: 32, bottom: 72 };
@@ -421,6 +427,18 @@ export function createRenderer(canvas) {
     if (extras.hint) {
       text(extras.hint, VIEW.width / 2, VIEW.height - 44, 20, PALETTE.accent, 'center');
     }
+    // The live job: its current objective and the distance to it.
+    if (extras.objective) {
+      text(extras.objective, 24, 106, 20, PALETTE.accent, 'left');
+    }
+    // The live side activity: a fare, a race clock, or a recent result.
+    if (extras.activity) {
+      text(extras.activity, 24, 134, 20, PALETTE.text, 'left');
+    }
+    // Sun tokens found, top right under the wanted stars.
+    if (extras.tokens) {
+      text(`☀ ${extras.tokens.collected}/${extras.tokens.total}`, VIEW.width - 24, 78, 20, PALETTE.accent, 'right');
+    }
   }
 
   function drawPanel(title, lines, prompt) {
@@ -437,17 +455,101 @@ export function createRenderer(canvas) {
     text(prompt, VIEW.width / 2, y + height - 38, 22, PALETTE.text, 'center');
   }
 
-  const TITLE_LINES = [
-    'Jax Marlowe just rolled into town with nothing but a stolen',
-    'sunset and a name to make. Mama Rosa has work for him —',
-    'if he can stay out of trouble long enough to take it.',
-    '',
-    'Walk with WASD or the arrow keys. Pause with P.',
+  const HOWTO_LINES = [
+    'WASD or arrow keys — walk and drive.',
+    'E — steal a car / get out of one.',
+    'Space — punch · Click — aim and shoot the pistol.',
+    '1 fists · 2 pistol · R reload.',
+    'Drive a cab and fares will find you.',
+    'Drive into the pink RACE marker to run the loop.',
+    '30 gold sun tokens hide around the bay, $25 each.',
+    'Missions pay cash. Finish one job to unlock the next.',
   ];
+
+  /** Objective and fare markers: a pulsing diamond on a beam of light. */
+  function drawMarkers(rect, markers) {
+    const pulse = 0.65 + 0.35 * Math.sin((performance.now() / 1000) * 4);
+    for (const marker of markers) {
+      if (!inView(rect, marker.x - 40, marker.y - 160, 80, 200)) continue;
+      context.globalAlpha = 0.25 * pulse;
+      context.fillStyle = marker.color;
+      context.fillRect(marker.x - 3, marker.y - 130, 6, 130);
+      context.globalAlpha = pulse;
+      const r = marker.big ? 16 : 10;
+      context.save();
+      context.translate(marker.x, marker.y);
+      context.rotate(Math.PI / 4);
+      context.fillStyle = marker.color;
+      context.fillRect(-r / 2, -r / 2, r, r);
+      context.restore();
+      context.globalAlpha = 1;
+      if (marker.label) {
+        text(marker.label, marker.x, marker.y - 34, 16, marker.color, 'center');
+      }
+    }
+  }
+
+  /** Sun tokens still lying out in the world: small gold coins. */
+  function drawTokens(rect, tokens) {
+    for (const token of tokens) {
+      if (!inView(rect, token.x - 16, token.y - 16, 32, 32)) continue;
+      context.fillStyle = '#f2c94c';
+      context.beginPath();
+      context.arc(token.x, token.y, 7, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle = '#fff3c9';
+      context.beginPath();
+      context.arc(token.x, token.y, 3, 0, Math.PI * 2);
+      context.fill();
+    }
+  }
+
+  /**
+   * A menu: a title, an optional blurb, and a list of items the player
+   * moves through with W/S or the arrow keys. Returns the item rects in
+   * view coordinates, so the main loop can hit-test clicks against them.
+   */
+  function drawMenu(menu) {
+    if (!menu) return null;
+    const itemH = 44;
+    const gap = 8;
+    const blurb = menu.blurb ?? [];
+    const width = 640;
+    const x = (VIEW.width - width) / 2;
+    const height = 130 + blurb.length * 30 + menu.items.length * (itemH + gap) + 64;
+    const y = (VIEW.height - height) / 2;
+    context.fillStyle = PALETTE.panel;
+    context.fillRect(x, y, width, height);
+    context.textBaseline = 'alphabetic';
+    text(menu.title, VIEW.width / 2, y + 78, 46, PALETTE.accent, 'center');
+    for (let i = 0; i < blurb.length; i += 1) {
+      text(blurb[i], VIEW.width / 2, y + 120 + i * 30, 20, PALETTE.muted, 'center');
+    }
+    const rects = [];
+    const itemsTop = y + 120 + blurb.length * 30 + 12;
+    for (let i = 0; i < menu.items.length; i += 1) {
+      const item = menu.items[i];
+      const ix = x + 80;
+      const iy = itemsTop + i * (itemH + gap);
+      const iw = width - 160;
+      if (i === menu.selected) {
+        context.fillStyle = 'rgba(242, 201, 76, 0.22)';
+        context.fillRect(ix, iy, iw, itemH);
+        context.strokeStyle = PALETTE.accent;
+        context.lineWidth = 2;
+        context.strokeRect(ix, iy, iw, itemH);
+      }
+      text(item.label, VIEW.width / 2, iy + 29, 22, item.disabled ? 'rgba(245, 234, 214, 0.35)' : PALETTE.text, 'center');
+      rects.push({ x: ix, y: iy, w: iw, h: itemH, action: item.action, disabled: item.disabled, index: i });
+    }
+    text(menu.footer ?? '', VIEW.width / 2, y + height - 30, 18, PALETTE.muted, 'center');
+    return rects;
+  }
 
   /** Paint one frame: the city through the camera, then the HUD or a panel.
    * `extras` carries the live vehicles, pedestrians, the driven car and any
-   * interaction hint; screenshot staging passes the same shape. */
+   * interaction hint; screenshot staging passes the same shape. Menu screens
+   * return their item rects for click hit-testing. */
   function draw(world, player, camera, screen, extras = {}) {
     const rect = visibleRect(camera);
     context.setTransform(1, 0, 0, 1, 0, 0);
@@ -467,6 +569,8 @@ export function createRenderer(canvas) {
     context.fillRect(rect.x - 64, rect.y - 64, rect.width + 128, rect.height + 128);
     // Particles sit on top of the wash so flashes and glows read clearly.
     if (extras.effects) extras.effects.draw(context, rect);
+    if (extras.markers) drawMarkers(rect, extras.markers);
+    if (extras.tokensList) drawTokens(rect, extras.tokensList);
     // Crosshair at the mouse while the pistol is out (on foot only).
     if (extras.aim && extras.weapon === 'pistol' && !player.vehicle) {
       const ax = extras.aim.x;
@@ -485,18 +589,34 @@ export function createRenderer(canvas) {
       context.lineTo(ax, ay + 14);
       context.stroke();
     }
-    if (screen === SCREEN_TITLE) {
-      context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
-      drawPanel('MARISOL BAY', TITLE_LINES, 'Press Space or click to start');
-      return;
+    // Screen overlays, in screen space. Menus return their item rects so
+    // the main loop can hit-test clicks against them.
+    context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
+    if (screen === SCREEN_TITLE || screen === SCREEN_MISSIONS || screen === SCREEN_PAUSED) {
+      if (screen === SCREEN_PAUSED) drawHud(extras);
+      return { menu: drawMenu(extras.menu) };
+    }
+    if (screen === SCREEN_BRIEFING) {
+      const briefing = extras.briefing ?? { title: '', lines: [], prompt: '' };
+      drawPanel(briefing.title, briefing.lines, briefing.prompt);
+      return {};
+    }
+    if (screen === SCREEN_PASSED) {
+      const panel = extras.endPanel ?? { lines: [] };
+      drawPanel('JOB DONE', panel.lines, 'Press Space to continue');
+      return {};
+    }
+    if (screen === SCREEN_FAILED) {
+      const panel = extras.endPanel ?? { lines: [] };
+      drawPanel('JOB FAILED', panel.lines, 'Press Space to continue');
+      return {};
+    }
+    if (screen === SCREEN_HOWTO) {
+      drawPanel('HOW TO PLAY', HOWTO_LINES, 'Press Space to go back');
+      return {};
     }
     drawHud(extras);
-    if (screen === SCREEN_PAUSED) {
-      context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
-      drawPanel('Paused', ['The bay will wait for you.'], 'Press P to resume');
-    }
     if (screen === SCREEN_BUSTED) {
-      context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
       const fine = extras.bustInfo?.fine ?? 0;
       drawPanel(
         'BUSTED',
@@ -504,6 +624,7 @@ export function createRenderer(canvas) {
         'Press Space to continue',
       );
     }
+    return {};
   }
 
   resize();
